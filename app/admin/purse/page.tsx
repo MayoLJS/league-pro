@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMainLedger, type LedgerEntry } from '@/lib/actions/ledger-actions'
+import { getMainLedger, addPurchaseEntry, type LedgerEntry } from '@/lib/actions/ledger-actions'
 
 export default function MainPursePage() {
     const router = useRouter()
@@ -10,6 +10,10 @@ export default function MainPursePage() {
     const [total, setTotal] = useState<number>(0)
     const [isLoading, setIsLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [showPurchaseModal, setShowPurchaseModal] = useState(false)
+    const [purchaseDescription, setPurchaseDescription] = useState('')
+    const [purchaseAmount, setPurchaseAmount] = useState('')
+    const [isSubmitting, setIsSubmitting] = useState(false)
 
     useEffect(() => {
         loadPurseData()
@@ -26,6 +30,27 @@ export default function MainPursePage() {
         }
 
         setIsLoading(false)
+    }
+
+    const handlePurchaseSubmit = async (e: React.FormEvent) => {
+        e.preventDefault()
+        setIsSubmitting(true)
+
+        const amount = parseFloat(purchaseAmount)
+        const result = await addPurchaseEntry(purchaseDescription, amount)
+
+        if (result.success) {
+            // Reset form and close modal
+            setPurchaseDescription('')
+            setPurchaseAmount('')
+            setShowPurchaseModal(false)
+            // Reload data
+            await loadPurseData()
+        } else {
+            alert(result.error || 'Failed to add purchase')
+        }
+
+        setIsSubmitting(false)
     }
 
     if (isLoading) {
@@ -116,13 +141,30 @@ export default function MainPursePage() {
                             Accumulated funds from all sessions
                         </p>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                        <div style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
-                            Total Balance
+                    <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'flex-end' }}>
+                        <div>
+                            <div style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+                                Total Balance
+                            </div>
+                            <div style={{ color: '#10b981', fontSize: '3rem', fontWeight: 'bold' }}>
+                                ₦{total.toFixed(2)}
+                            </div>
                         </div>
-                        <div style={{ color: '#10b981', fontSize: '3rem', fontWeight: 'bold' }}>
-                            ₦{total.toFixed(2)}
-                        </div>
+                        <button
+                            onClick={() => setShowPurchaseModal(true)}
+                            style={{
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: '#ef4444',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                fontSize: '0.875rem',
+                            }}
+                        >
+                            🛒 Record Purchase
+                        </button>
                     </div>
                 </div>
 
@@ -162,7 +204,7 @@ export default function MainPursePage() {
                             <div
                                 style={{
                                     display: 'grid',
-                                    gridTemplateColumns: '150px 1fr 150px',
+                                    gridTemplateColumns: '150px 1fr 120px 150px',
                                     padding: '0.75rem 1.5rem',
                                     backgroundColor: '#0f172a50',
                                     borderBottom: '1px solid #334155',
@@ -174,6 +216,7 @@ export default function MainPursePage() {
                             >
                                 <div>Date</div>
                                 <div>Description</div>
+                                <div>Type</div>
                                 <div style={{ textAlign: 'right' }}>Amount</div>
                             </div>
 
@@ -183,7 +226,7 @@ export default function MainPursePage() {
                                     key={entry.id}
                                     style={{
                                         display: 'grid',
-                                        gridTemplateColumns: '150px 1fr 150px',
+                                        gridTemplateColumns: '150px 1fr 120px 150px',
                                         padding: '1rem 1.5rem',
                                         borderBottom: '1px solid #334155',
                                         alignItems: 'center',
@@ -199,21 +242,151 @@ export default function MainPursePage() {
                                     <div style={{ color: 'white' }}>
                                         {entry.description}
                                     </div>
+                                    <div>
+                                        <span
+                                            style={{
+                                                padding: '0.25rem 0.5rem',
+                                                backgroundColor: entry.type === 'PURSE' ? '#10b98120' : '#ef444420',
+                                                color: entry.type === 'PURSE' ? '#10b981' : '#ef4444',
+                                                borderRadius: '4px',
+                                                fontSize: '0.75rem',
+                                                fontWeight: '600',
+                                            }}
+                                        >
+                                            {entry.type === 'PURSE' ? 'CREDIT' : 'EXPENSE'}
+                                        </span>
+                                    </div>
                                     <div
                                         style={{
-                                            color: '#10b981',
+                                            color: entry.type === 'PURSE' ? '#10b981' : '#ef4444',
                                             fontWeight: '600',
                                             fontSize: '1.1rem',
                                             textAlign: 'right',
                                         }}
                                     >
-                                        +₦{entry.amount.toFixed(2)}
+                                        {entry.type === 'PURSE' ? '+' : '-'}₦{entry.amount.toFixed(2)}
                                     </div>
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
+
+                {/* Purchase Entry Modal */}
+                {showPurchaseModal && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 1000,
+                        }}
+                        onClick={() => setShowPurchaseModal(false)}
+                    >
+                        <div
+                            style={{
+                                backgroundColor: '#1e293b',
+                                padding: '2rem',
+                                borderRadius: '12px',
+                                border: '2px solid #ef4444',
+                                maxWidth: '500px',
+                                width: '90%',
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h2 style={{ color: 'white', fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>
+                                🛒 Record Purchase
+                            </h2>
+                            <form onSubmit={handlePurchaseSubmit}>
+                                <div style={{ marginBottom: '1.5rem' }}>
+                                    <label style={{ display: 'block', color: '#94a3b8', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                                        Description
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={purchaseDescription}
+                                        onChange={(e) => setPurchaseDescription(e.target.value)}
+                                        required
+                                        placeholder="e.g., Footballs, Jerseys, Equipment"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            backgroundColor: '#0f172a',
+                                            border: '2px solid #334155',
+                                            borderRadius: '8px',
+                                            color: 'white',
+                                            fontSize: '1rem',
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ marginBottom: '1.5rem' }}>
+                                    <label style={{ display: 'block', color: '#94a3b8', marginBottom: '0.5rem', fontSize: '0.875rem' }}>
+                                        Amount (₦)
+                                    </label>
+                                    <input
+                                        type="number"
+                                        value={purchaseAmount}
+                                        onChange={(e) => setPurchaseAmount(e.target.value)}
+                                        required
+                                        min="0.01"
+                                        step="0.01"
+                                        placeholder="0.00"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            backgroundColor: '#0f172a',
+                                            border: '2px solid #334155',
+                                            borderRadius: '8px',
+                                            color: 'white',
+                                            fontSize: '1rem',
+                                        }}
+                                    />
+                                </div>
+                                <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPurchaseModal(false)}
+                                        disabled={isSubmitting}
+                                        style={{
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#334155',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            fontWeight: '600',
+                                            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                                            opacity: isSubmitting ? 0.6 : 1,
+                                        }}
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={isSubmitting}
+                                        style={{
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#ef4444',
+                                            color: 'white',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            fontWeight: '600',
+                                            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                                            opacity: isSubmitting ? 0.6 : 1,
+                                        }}
+                                    >
+                                        {isSubmitting ? 'Adding...' : 'Add Purchase'}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )

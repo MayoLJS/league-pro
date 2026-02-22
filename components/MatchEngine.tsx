@@ -6,7 +6,7 @@
 
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
     getMatchQueue,
     getActiveMatch,
@@ -18,13 +18,15 @@ import {
     type TopScorer,
 } from '@/lib/actions/match-actions'
 import { endSession } from '@/lib/actions/session-actions'
+import { createClient } from '@/lib/supabase/client'
 
 interface MatchEngineProps {
     sessionId: string
     teams: any[]
+    isReadOnly?: boolean
 }
 
-export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
+export default function MatchEngine({ sessionId, teams, isReadOnly = false }: MatchEngineProps) {
     const [queue, setQueue] = useState<MatchQueueTeam[]>([])
     const [topScorers, setTopScorers] = useState<TopScorer[]>([])
     const [activeMatch, setActiveMatch] = useState<any>(null)
@@ -36,6 +38,54 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
     useEffect(() => {
         loadMatchData()
     }, [sessionId])
+
+    // Supabase Realtime: re-fetch top scorers whenever a goal event is inserted
+    useEffect(() => {
+        const supabase = createClient()
+
+        const channel = supabase
+            .channel(`match_events:${sessionId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'match_events',
+                },
+                async () => {
+                    // Re-fetch scorers + queue on every goal event
+                    const [queueData, scorersData] = await Promise.all([
+                        getMatchQueue(sessionId),
+                        getTopScorers(sessionId),
+                    ])
+                    setQueue(queueData)
+                    setTopScorers(scorersData)
+                }
+            )
+            .subscribe()
+
+        return () => {
+            supabase.removeChannel(channel)
+        }
+    }, [sessionId])
+
+    // Derived: leader cards with tie-break info
+    const topScorerCard = useMemo(() => {
+        if (topScorers.length === 0) return null
+        const max = topScorers[0].goals
+        if (max === 0) return null
+        const tied = topScorers.filter(s => s.goals === max)
+        return { player: tied[0], tiedCount: tied.length }
+    }, [topScorers])
+
+    const topAssisterCard = useMemo(() => {
+        if (topScorers.length === 0) return null
+        const byAssists = [...topScorers].sort((a, b) => b.assists - a.assists)
+        const max = byAssists[0].assists
+        if (max === 0) return null
+        const tied = byAssists.filter(s => s.assists === max)
+        return { player: tied[0], tiedCount: tied.length }
+    }, [topScorers])
 
     const loadMatchData = async () => {
         const [queueData, matchData, scorersData] = await Promise.all([
@@ -91,7 +141,7 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
     const handleEndMatch = async () => {
         if (!activeMatch) return
 
-        if (!confirm('End this match and apply Winner Stays On logic?')) {
+        if (!confirm('End this match and start the next one?')) {
             return
         }
 
@@ -99,10 +149,22 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
         const result = await endMatch(activeMatch.id, sessionId)
 
         if (result.success) {
+            // Reload data to get updated queue
             await loadMatchData()
             setSelectedTeam('')
             setSelectedScorer('')
             setSelectedAssister('')
+
+            // Automatically start the next match if there are at least 2 teams
+            const queueResult = await getMatchQueue(sessionId)
+            if (queueResult.length >= 2) {
+                const startResult = await startMatch(sessionId)
+                if (startResult.success) {
+                    await loadMatchData()
+                } else {
+                    alert(startResult.error || 'Failed to start next match')
+                }
+            }
         } else {
             alert(result.error || 'Failed to end match')
         }
@@ -138,6 +200,23 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
 
     return (
         <div>
+            {/* Read-only banner for completed sessions */}
+            {isReadOnly && (
+                <div
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.6rem 1rem',
+                        backgroundColor: '#6366f115',
+                        border: '1px solid #6366f140',
+                        borderRadius: '8px',
+                        marginBottom: '1.5rem',
+                    }}
+                >
+                    <span style={{ fontSize: '0.875rem', color: '#6366f1', fontWeight: '600' }}>🔒 Session completed — match controls are locked</span>
+                </div>
+            )}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '2rem', marginBottom: '2rem' }}>
                 {/* League Table */}
                 <div>
@@ -169,6 +248,9 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                                         Team
                                     </th>
                                     <th style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                                        P
+                                    </th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
                                         W
                                     </th>
                                     <th style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
@@ -197,6 +279,9 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                                                 {index + 1}
                                             </td>
                                             <td style={{ padding: '0.75rem', color: 'white' }}>{team.name}</td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8' }}>
+                                                {team.wins + team.draws + team.losses}
+                                            </td>
                                             <td style={{ padding: '0.75rem', textAlign: 'center', color: '#10b981' }}>
                                                 {team.wins}
                                             </td>
@@ -228,6 +313,59 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                     >
                         Top Scorers ⚽
                     </h3>
+
+                    {/* Leader Stat Cards */}
+                    {(topScorerCard || topAssisterCard) && (
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+                            {topScorerCard && (
+                                <div
+                                    style={{
+                                        padding: '0.75rem 1rem',
+                                        backgroundColor: '#10b98115',
+                                        border: '1px solid #10b98140',
+                                        borderRadius: '8px',
+                                    }}
+                                >
+                                    <div style={{ color: '#10b981', fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Top Scorer</div>
+                                    <div style={{ color: 'white', fontWeight: '700', fontSize: '0.95rem' }}>
+                                        {topScorerCard.player.name}
+                                        {topScorerCard.tiedCount > 1 && (
+                                            <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: '400', marginLeft: '0.35rem' }}>
+                                                +{topScorerCard.tiedCount - 1} tied
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.1rem' }}>
+                                        {topScorerCard.player.goals} goal{topScorerCard.player.goals !== 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            )}
+                            {topAssisterCard && (
+                                <div
+                                    style={{
+                                        padding: '0.75rem 1rem',
+                                        backgroundColor: '#3b82f615',
+                                        border: '1px solid #3b82f640',
+                                        borderRadius: '8px',
+                                    }}
+                                >
+                                    <div style={{ color: '#3b82f6', fontSize: '0.7rem', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Top Assister</div>
+                                    <div style={{ color: 'white', fontWeight: '700', fontSize: '0.95rem' }}>
+                                        {topAssisterCard.player.name}
+                                        {topAssisterCard.tiedCount > 1 && (
+                                            <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: '400', marginLeft: '0.35rem' }}>
+                                                +{topAssisterCard.tiedCount - 1} tied
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginTop: '0.1rem' }}>
+                                        {topAssisterCard.player.assists} assist{topAssisterCard.player.assists !== 1 ? 's' : ''}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div
                         style={{
                             backgroundColor: '#0f172a',
@@ -243,11 +381,11 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                                     <th style={{ padding: '0.75rem', textAlign: 'left', color: '#94a3b8', fontSize: '0.875rem' }}>
                                         Player
                                     </th>
-                                    <th style={{ padding: '0.75rem', textAlign: 'left', color: '#94a3b8', fontSize: '0.875rem' }}>
-                                        Team
-                                    </th>
                                     <th style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem', fontWeight: '600' }}>
                                         Goals
+                                    </th>
+                                    <th style={{ padding: '0.75rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>
+                                        Assists
                                     </th>
                                 </tr>
                             </thead>
@@ -270,11 +408,11 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                                             <td style={{ padding: '0.75rem', color: 'white', fontWeight: '600' }}>
                                                 {scorer.name}
                                             </td>
-                                            <td style={{ padding: '0.75rem', color: '#94a3b8', fontSize: '0.875rem' }}>
-                                                {scorer.teamName || '-'}
-                                            </td>
                                             <td style={{ padding: '0.75rem', textAlign: 'center', color: '#10b981', fontWeight: 'bold' }}>
                                                 {scorer.goals}
+                                            </td>
+                                            <td style={{ padding: '0.75rem', textAlign: 'center', color: '#3b82f6', fontWeight: '600' }}>
+                                                {scorer.assists || 0}
                                             </td>
                                         </tr>
                                     ))
@@ -291,17 +429,17 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                     <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginBottom: '1rem' }}>
                         <button
                             onClick={handleStartMatch}
-                            disabled={isLoading || queue.length < 2}
+                            disabled={isLoading || queue.length < 2 || isReadOnly}
                             style={{
                                 padding: '1rem 2rem',
-                                backgroundColor: queue.length < 2 ? '#334155' : '#10b981',
+                                backgroundColor: queue.length < 2 || isReadOnly ? '#334155' : '#10b981',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '8px',
-                                cursor: queue.length < 2 || isLoading ? 'not-allowed' : 'pointer',
+                                cursor: isLoading || queue.length < 2 || isReadOnly ? 'not-allowed' : 'pointer',
                                 fontWeight: '600',
                                 fontSize: '1.125rem',
-                                opacity: isLoading ? 0.6 : 1,
+                                opacity: isLoading || isReadOnly ? 0.4 : 1,
                             }}
                         >
                             {isLoading ? 'Starting...' : '▶ Start Match'}
@@ -309,17 +447,17 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
 
                         <button
                             onClick={handleEndSession}
-                            disabled={isLoading}
+                            disabled={isLoading || isReadOnly}
                             style={{
                                 padding: '1rem 2rem',
                                 backgroundColor: '#f59e0b',
                                 color: 'white',
                                 border: 'none',
                                 borderRadius: '8px',
-                                cursor: isLoading ? 'not-allowed' : 'pointer',
+                                cursor: isLoading || isReadOnly ? 'not-allowed' : 'pointer',
                                 fontWeight: '600',
                                 fontSize: '1.125rem',
-                                opacity: isLoading ? 0.6 : 1,
+                                opacity: isLoading || isReadOnly ? 0.4 : 1,
                             }}
                         >
                             {isLoading ? 'Ending...' : '🏁 End Session'}
@@ -396,7 +534,7 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                             </select>
 
                             {selectedTeam && (
-                                <>
+                                <div style={{ display: 'grid', gap: '1rem' }}>
                                     <select
                                         value={selectedScorer}
                                         onChange={(e) => setSelectedScorer(e.target.value)}
@@ -438,7 +576,7 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                                                 </option>
                                             ))}
                                     </select>
-                                </>
+                                </div>
                             )}
 
                             <button
@@ -460,24 +598,46 @@ export default function MatchEngine({ sessionId, teams }: MatchEngineProps) {
                         </div>
                     </div>
 
-                    {/* End Match Button */}
-                    <button
-                        onClick={handleEndMatch}
-                        disabled={isLoading}
-                        style={{
-                            width: '100%',
-                            padding: '1rem',
-                            backgroundColor: '#ef4444',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: isLoading ? 'not-allowed' : 'pointer',
-                            fontWeight: '600',
-                            opacity: isLoading ? 0.6 : 1,
-                        }}
-                    >
-                        {isLoading ? 'Ending...' : '🏁 End Match'}
-                    </button>
+                    {/* Match Control Buttons */}
+                    <div style={{ display: 'flex', gap: '1rem' }}>
+                        <button
+                            onClick={handleEndMatch}
+                            disabled={isLoading || isReadOnly}
+                            style={{
+                                flex: 1,
+                                padding: '1rem',
+                                backgroundColor: isReadOnly ? '#334155' : '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: isLoading || isReadOnly ? 'not-allowed' : 'pointer',
+                                fontWeight: '600',
+                                fontSize: '1.125rem',
+                                opacity: isLoading || isReadOnly ? 0.4 : 1,
+                            }}
+                        >
+                            {isLoading ? 'Loading...' : '⏭️ Next Match'}
+                        </button>
+
+                        <button
+                            onClick={handleEndSession}
+                            disabled={isLoading || isReadOnly}
+                            style={{
+                                flex: 1,
+                                padding: '1rem',
+                                backgroundColor: isReadOnly ? '#334155' : '#f59e0b',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                cursor: isLoading || isReadOnly ? 'not-allowed' : 'pointer',
+                                fontWeight: '600',
+                                fontSize: '1.125rem',
+                                opacity: isLoading || isReadOnly ? 0.4 : 1,
+                            }}
+                        >
+                            {isLoading ? 'Ending...' : '🏁 End Session'}
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

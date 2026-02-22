@@ -8,6 +8,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/service'
 import { revalidatePath } from 'next/cache'
 import type { PlayerInsert } from '@/lib/supabase/types'
 
@@ -54,7 +55,6 @@ export async function registerPlayer(
             phone: input.phone,
             email: input.email || null,
             preferred_position: input.preferred_position,
-            rating: 5, // Default rating
             caps: 0,
             man_of_the_match_count: 0,
             role: 'player',
@@ -138,7 +138,7 @@ export async function getPlayerById(playerId: string) {
 
     const { data, error } = await supabase
         .from('players')
-        .select('id, name, preferred_position, rating, man_of_the_match_count, caps')
+        .select('id, name, preferred_position, man_of_the_match_count, caps')
         .eq('id', playerId)
         .single()
 
@@ -148,4 +148,42 @@ export async function getPlayerById(playerId: string) {
     }
 
     return data
+}
+
+/**
+ * Update a player's preferred position.
+ * Uses service-role client so it works for cookie-auth (name-login) players too.
+ */
+export async function updatePlayerPosition(
+    playerId: string,
+    position: 'DEF' | 'MID' | 'ATT'
+): Promise<ActionResult> {
+    if (!playerId) return { success: false, error: 'No player ID provided.' }
+
+    const validPositions = ['DEF', 'MID', 'ATT']
+    if (!validPositions.includes(position)) {
+        return { success: false, error: `Invalid position: ${position}` }
+    }
+
+    try {
+        const serviceClient = createServiceRoleClient()
+
+        const { error } = await serviceClient
+            .from('players')
+            .update({
+                preferred_position: position,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', playerId)
+
+        if (error) {
+            console.error('updatePlayerPosition error:', error)
+            return { success: false, error: 'Failed to update position.' }
+        }
+
+        return { success: true }
+    } catch (err) {
+        console.error('Unexpected error in updatePlayerPosition:', err)
+        return { success: false, error: 'An unexpected error occurred.' }
+    }
 }

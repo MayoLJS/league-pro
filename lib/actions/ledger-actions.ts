@@ -278,7 +278,7 @@ export async function getMainLedger(): Promise<ActionResult<{ entries: LedgerEnt
             }
         }
 
-        // Fetch all PURSE entries
+        // Fetch all PURSE and DEBIT entries
         const { data: entries, error } = await supabase
             .from('ledger')
             .select(`
@@ -292,7 +292,7 @@ export async function getMainLedger(): Promise<ActionResult<{ entries: LedgerEnt
                 created_at,
                 session:session_id (date, venue)
             `)
-            .eq('type', 'PURSE')
+            .in('type', ['PURSE', 'DEBIT'])
             .order('transaction_date', { ascending: false })
 
         if (error) {
@@ -316,8 +316,10 @@ export async function getMainLedger(): Promise<ActionResult<{ entries: LedgerEnt
             created_at: entry.created_at,
         }))
 
-        // Calculate total
-        const total = formattedEntries.reduce((sum, entry) => sum + entry.amount, 0)
+        // Calculate total (PURSE credits - DEBIT expenses)
+        const total = formattedEntries.reduce((sum, entry) => {
+            return entry.type === 'PURSE' ? sum + entry.amount : sum - entry.amount
+        }, 0)
 
         return {
             success: true,
@@ -328,6 +330,90 @@ export async function getMainLedger(): Promise<ActionResult<{ entries: LedgerEnt
         }
     } catch (error) {
         console.error('Unexpected error in getMainLedger:', error)
+        return {
+            success: false,
+            error: 'An unexpected error occurred.',
+        }
+    }
+}
+
+/**
+ * Add a purchase/expense entry to the main purse
+ * Creates a DEBIT type entry that reduces the purse balance
+ */
+export async function addPurchaseEntry(
+    description: string,
+    amount: number
+): Promise<ActionResult> {
+    try {
+        const supabase = await createClient()
+
+        // Get the current user (must be admin)
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+            return {
+                success: false,
+                error: 'You must be logged in to add purchases.',
+            }
+        }
+
+        // Verify admin role
+        const { data: admin } = await supabase
+            .from('players')
+            .select('id, role')
+            .eq('auth_user_id', user.id)
+            .single()
+
+        if (!admin || admin.role !== 'admin') {
+            return {
+                success: false,
+                error: 'You must be an admin to add purchases.',
+            }
+        }
+
+        // Validate inputs
+        if (!description || description.trim().length === 0) {
+            return {
+                success: false,
+                error: 'Description is required.',
+            }
+        }
+
+        if (!amount || amount <= 0) {
+            return {
+                success: false,
+                error: 'Amount must be greater than zero.',
+            }
+        }
+
+        // Create DEBIT entry in ledger
+        const { error: debitError } = await supabase
+            .from('ledger')
+            .insert({
+                transaction_date: new Date().toISOString().split('T')[0],
+                description: description.trim(),
+                type: 'DEBIT',
+                amount: amount,
+                player_id: null,
+                session_id: null,  // Purchases are at purse level, not session level
+                created_by: admin.id,
+            })
+
+        if (debitError) {
+            console.error('Database error creating debit entry:', debitError)
+            return {
+                success: false,
+                error: `Failed to create purchase entry: ${debitError.message}`,
+            }
+        }
+
+        revalidatePath('/admin/purse')
+
+        return {
+            success: true,
+        }
+    } catch (error) {
+        console.error('Unexpected error in addPurchaseEntry:', error)
         return {
             success: false,
             error: 'An unexpected error occurred.',

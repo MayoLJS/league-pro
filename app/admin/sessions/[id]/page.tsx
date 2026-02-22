@@ -24,7 +24,6 @@ interface Registration {
         name: string
         phone: string
         preferred_position: string
-        rating: number
     }
 }
 
@@ -39,6 +38,7 @@ export default function SessionDetailPage() {
     const [isLoading, setIsLoading] = useState(true)
     const [processingPayment, setProcessingPayment] = useState<string | null>(null)
     const [manOfTheMatch, setManOfTheMatch] = useState<any | null>(null)
+    const [isPlayersExpanded, setIsPlayersExpanded] = useState(true)
 
     useEffect(() => {
         loadSessionData()
@@ -109,6 +109,9 @@ export default function SessionDetailPage() {
     const totalRevenue = registrations
         .filter((r) => r.payment_status === 'PAID')
         .reduce((sum) => sum + (session?.cost || 0), 0)
+
+    // Derived: lock all interactive elements for completed sessions
+    const isCompleted = session?.status === 'COMPLETED'
 
     if (isLoading) {
         return (
@@ -214,22 +217,6 @@ export default function SessionDetailPage() {
                             >
                                 {session.status}
                             </span>
-                            {teams.length > 0 && (
-                                <button
-                                    onClick={() => router.push(`/admin/sessions/${sessionId}/match-engine`)}
-                                    style={{
-                                        padding: '0.75rem 1.5rem',
-                                        backgroundColor: '#6366f1',
-                                        color: 'white',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        fontWeight: '600',
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    ⚽ Match Engine
-                                </button>
-                            )}
                         </div>
                     </div>
 
@@ -304,112 +291,131 @@ export default function SessionDetailPage() {
                         </div>
                     </div>
 
-                    {/* Registered Players */}
+                    {/* Registered Players — Collapsible */}
                     <div
                         style={{
                             backgroundColor: '#1e293b',
-                            padding: '1.5rem',
                             borderRadius: '12px',
                             border: '2px solid #334155',
                             marginBottom: '2rem',
+                            overflow: 'hidden',
                         }}
                     >
-                        <h2
+                        {/* Toggle Header */}
+                        <button
+                            onClick={() => setIsPlayersExpanded((prev) => !prev)}
                             style={{
-                                color: 'white',
-                                fontSize: '1.5rem',
-                                fontWeight: 'bold',
-                                marginBottom: '1.5rem',
+                                width: '100%',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '1.5rem',
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                textAlign: 'left',
                             }}
                         >
-                            Registered Players ({registrations.length})
-                        </h2>
+                            <h2
+                                style={{
+                                    color: 'white',
+                                    fontSize: '1.5rem',
+                                    fontWeight: 'bold',
+                                    margin: 0,
+                                }}
+                            >
+                                Registered Players ({registrations.length})
+                            </h2>
+                            <span
+                                style={{
+                                    color: '#94a3b8',
+                                    fontSize: '1.25rem',
+                                    display: 'inline-block',
+                                    transform: isPlayersExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                                    transition: 'transform 0.2s ease',
+                                    lineHeight: 1,
+                                }}
+                                aria-label={isPlayersExpanded ? 'Collapse' : 'Expand'}
+                            >
+                                ▼
+                            </span>
+                        </button>
 
-                        {registrations.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
-                                No players registered yet
-                            </div>
-                        ) : (
-                            <div style={{ display: 'grid', gap: '0.75rem' }}>
-                                {registrations.map((reg, index) => (
-                                    <div
-                                        key={reg.id}
-                                        style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            padding: '1rem',
-                                            backgroundColor: '#0f172a',
-                                            borderRadius: '8px',
-                                            border: `2px solid ${reg.payment_status === 'PAID' ? '#10b981' : '#334155'}`,
-                                            gap: '1rem',
-                                            flexWrap: 'wrap',
-                                        }}
-                                    >
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                        {/* Collapsible Body */}
+                        {isPlayersExpanded && (
+                            <div style={{ padding: '0 1.5rem 1.5rem' }}>
+                                {registrations.length === 0 ? (
+                                    <div style={{ textAlign: 'center', padding: '2rem', color: '#94a3b8' }}>
+                                        No players registered yet
+                                    </div>
+                                ) : (
+                                    <div style={{ display: 'grid', gap: '0.75rem' }}>
+                                        {registrations.map((reg) => (
                                             <div
+                                                key={reg.id}
                                                 style={{
-                                                    backgroundColor: '#334155',
-                                                    color: '#94a3b8',
-                                                    borderRadius: '50%',
-                                                    width: '32px',
-                                                    height: '32px',
                                                     display: 'flex',
+                                                    justifyContent: 'space-between',
                                                     alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    fontWeight: '600',
-                                                    fontSize: '0.875rem',
+                                                    padding: '1rem',
+                                                    backgroundColor: '#0f172a',
+                                                    borderRadius: '8px',
+                                                    border: `2px solid ${reg.payment_status === 'PAID' ? '#10b981' : '#334155'}`,
+                                                    gap: '1rem',
+                                                    flexWrap: 'wrap',
                                                 }}
                                             >
-                                                #{reg.registration_order}
-                                            </div>
-                                            <div>
-                                                <div style={{ color: 'white', fontWeight: '600', marginBottom: '0.25rem' }}>
-                                                    {reg.players.name}
-                                                    {index < 2 && (
-                                                        <span
-                                                            style={{
-                                                                marginLeft: '0.5rem',
-                                                                padding: '0.125rem 0.5rem',
-                                                                backgroundColor: '#f59e0b20',
-                                                                color: '#f59e0b',
-                                                                borderRadius: '4px',
-                                                                fontSize: '0.75rem',
-                                                                fontWeight: '600',
-                                                            }}
-                                                        >
-                                                            CAPTAIN
-                                                        </span>
-                                                    )}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flex: 1 }}>
+                                                    <div
+                                                        style={{
+                                                            backgroundColor: '#334155',
+                                                            color: '#94a3b8',
+                                                            borderRadius: '50%',
+                                                            width: '32px',
+                                                            height: '32px',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            fontWeight: '600',
+                                                            fontSize: '0.875rem',
+                                                        }}
+                                                    >
+                                                        #{reg.registration_order}
+                                                    </div>
+                                                    <div>
+                                                        <div style={{ color: 'white', fontWeight: '600', marginBottom: '0.25rem' }}>
+                                                            {reg.players.name}
+                                                        </div>
+                                                        <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
+                                                            {reg.players.preferred_position} • {reg.players.phone}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                                <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-                                                    {reg.players.preferred_position} • Rating: {reg.players.rating}/10 • {reg.players.phone}
-                                                </div>
+                                                <button
+                                                    onClick={() => handlePaymentToggle(reg.id)}
+                                                    disabled={processingPayment === reg.id || isCompleted}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: reg.payment_status === 'PAID' ? '#10b981' : '#334155',
+                                                        color: 'white',
+                                                        border: 'none',
+                                                        borderRadius: '6px',
+                                                        cursor: processingPayment === reg.id || isCompleted ? 'not-allowed' : 'pointer',
+                                                        fontWeight: '600',
+                                                        fontSize: '0.875rem',
+                                                        opacity: processingPayment === reg.id || isCompleted ? 0.5 : 1,
+                                                    }}
+                                                >
+                                                    {processingPayment === reg.id
+                                                        ? '...'
+                                                        : reg.payment_status === 'PAID'
+                                                            ? '✓ PAID'
+                                                            : 'Mark as PAID'}
+                                                </button>
                                             </div>
-                                        </div>
-                                        <button
-                                            onClick={() => handlePaymentToggle(reg.id)}
-                                            disabled={processingPayment === reg.id}
-                                            style={{
-                                                padding: '0.5rem 1rem',
-                                                backgroundColor: reg.payment_status === 'PAID' ? '#10b981' : '#334155',
-                                                color: 'white',
-                                                border: 'none',
-                                                borderRadius: '6px',
-                                                cursor: processingPayment === reg.id ? 'not-allowed' : 'pointer',
-                                                fontWeight: '600',
-                                                fontSize: '0.875rem',
-                                                opacity: processingPayment === reg.id ? 0.6 : 1,
-                                            }}
-                                        >
-                                            {processingPayment === reg.id
-                                                ? '...'
-                                                : reg.payment_status === 'PAID'
-                                                    ? '✓ PAID'
-                                                    : 'Mark as PAID'}
-                                        </button>
+                                        ))}
                                     </div>
-                                ))}
+                                )}
                             </div>
                         )}
                     </div>
@@ -422,6 +428,7 @@ export default function SessionDetailPage() {
                             borderRadius: '12px',
                             border: '2px solid #334155',
                             marginBottom: '2rem',
+                            position: 'relative',
                         }}
                     >
                         <h2
@@ -434,6 +441,37 @@ export default function SessionDetailPage() {
                         >
                             💰 Session Ledger
                         </h2>
+                        {/* Read-only overlay for completed sessions */}
+                        {isCompleted && (
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    borderRadius: '12px',
+                                    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                                    zIndex: 10,
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    justifyContent: 'flex-end',
+                                    padding: '1rem',
+                                    pointerEvents: 'none',
+                                }}
+                            >
+                                <span
+                                    style={{
+                                        padding: '0.25rem 0.75rem',
+                                        backgroundColor: '#6366f120',
+                                        color: '#6366f1',
+                                        borderRadius: '6px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '600',
+                                        pointerEvents: 'none',
+                                    }}
+                                >
+                                    View Only
+                                </span>
+                            </div>
+                        )}
                         <SessionLedger sessionId={sessionId} initialPurseBalance={session.purse_balance || 0} />
                     </div>
 
@@ -444,6 +482,7 @@ export default function SessionDetailPage() {
                             padding: '1.5rem',
                             borderRadius: '12px',
                             border: '2px solid #334155',
+                            position: 'relative',
                         }}
                     >
                         <h2
@@ -456,10 +495,42 @@ export default function SessionDetailPage() {
                         >
                             Team Generation
                         </h2>
+                        {/* Read-only overlay for completed sessions */}
+                        {isCompleted && (
+                            <div
+                                style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    borderRadius: '12px',
+                                    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+                                    zIndex: 10,
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    justifyContent: 'flex-end',
+                                    padding: '1rem',
+                                    pointerEvents: 'none',
+                                }}
+                            >
+                                <span
+                                    style={{
+                                        padding: '0.25rem 0.75rem',
+                                        backgroundColor: '#6366f120',
+                                        color: '#6366f1',
+                                        borderRadius: '6px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: '600',
+                                        pointerEvents: 'none',
+                                    }}
+                                >
+                                    View Only
+                                </span>
+                            </div>
+                        )}
                         <TeamGenerator
                             sessionId={sessionId}
                             paidPlayersCount={paidCount}
                             onTeamsSaved={loadSessionData}
+                            savedTeams={teams}
                         />
                     </div>
 
@@ -484,7 +555,7 @@ export default function SessionDetailPage() {
                             >
                                 🏆 Match Engine - Winner Stays On
                             </h2>
-                            <MatchEngine sessionId={sessionId} teams={teams} />
+                            <MatchEngine sessionId={sessionId} teams={teams} isReadOnly={isCompleted} />
                         </div>
                     )}
 
@@ -537,7 +608,7 @@ export default function SessionDetailPage() {
                                 {manOfTheMatch.name}
                             </div>
                             <div style={{ color: '#94a3b8', fontSize: '1.25rem', marginBottom: '1.5rem' }}>
-                                {manOfTheMatch.preferred_position} • {manOfTheMatch.rating}/10 Rating
+                                {manOfTheMatch.preferred_position}
                             </div>
                             <div
                                 style={{

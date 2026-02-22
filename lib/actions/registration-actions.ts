@@ -7,7 +7,9 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { createServiceRoleClient } from '@/lib/supabase/service'
 import { revalidatePath } from 'next/cache'
+import { cookies } from 'next/headers'
 
 export interface ActionResult<T = void> {
     success: boolean
@@ -16,37 +18,53 @@ export interface ActionResult<T = void> {
 }
 
 /**
- * Register a player for a session
+ * Register a player for a session.
+ * Supports both Supabase-Auth sessions (admins) and player_id cookie (name-login players).
  */
 export async function registerForSession(
     sessionId: string
 ): Promise<ActionResult<{ registrationId: string }>> {
     try {
         const supabase = await createClient()
+        const cookieStore = await cookies()
 
-        // Get the current user
+        let playerId: string | null = null
+
+        // Path 1: Supabase Auth user (admin or legacy account)
         const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+            const { data: player } = await supabase
+                .from('players')
+                .select('id')
+                .eq('auth_user_id', user.id)
+                .single()
+            playerId = player?.id ?? null
+        }
 
-        if (!user) {
+        // Path 2: Name-login player (cookie)
+        if (!playerId) {
+            const cookiePlayerId = cookieStore.get('player_id')?.value
+            if (cookiePlayerId) {
+                // Validate the cookie value refers to a real player
+                const serviceClient = createServiceRoleClient()
+                const { data: player } = await serviceClient
+                    .from('players')
+                    .select('id')
+                    .eq('id', cookiePlayerId)
+                    .single()
+                playerId = player?.id ?? null
+            }
+        }
+
+        if (!playerId) {
             return {
                 success: false,
                 error: 'You must be logged in to register for a session.',
             }
         }
 
-        // Get the player record
-        const { data: player } = await supabase
-            .from('players')
-            .select('id')
-            .eq('auth_user_id', user.id)
-            .single()
-
-        if (!player) {
-            return {
-                success: false,
-                error: 'Player profile not found.',
-            }
-        }
+        // Use a local player object shape for downstream logic
+        const player = { id: playerId }
 
         // Check if session exists and is OPEN
         const { data: session } = await supabase
@@ -84,35 +102,26 @@ export async function registerForSession(
             }
         }
 
-        // Get current registration count
-        const { count } = await supabase
-            .from('registrations')
-            .select('*', { count: 'exact', head: true })
-            .eq('session_id', sessionId)
-
-        const currentCount = count || 0
-
-        if (currentCount >= session.max_players) {
-            return {
-                success: false,
-                error: 'This session is full.',
-            }
-        }
-
-        // Create registration with order
+        // Use atomic registration function to prevent race conditions
         const { data: registration, error } = await supabase
-            .from('registrations')
-            .insert({
-                player_id: player.id,
-                session_id: sessionId,
-                payment_status: 'PENDING',
-                registration_order: currentCount + 1,
+            .rpc('register_player_atomic', {
+                p_player_id: player.id,
+                p_session_id: sessionId,
+                p_max_players: session.max_players
             })
-            .select('id')
-            .single()
+            .single() as { data: { reg_id: string; reg_order: number } | null, error: any }
 
         if (error) {
             console.error('Database error creating registration:', error)
+
+            // Check if it's the "session full" error from our function
+            if (error.message && error.message.includes('Session is full')) {
+                return {
+                    success: false,
+                    error: 'This session is full.',
+                }
+            }
+
             console.error('Error details:', {
                 message: error.message,
                 code: error.code,
@@ -125,13 +134,20 @@ export async function registerForSession(
             }
         }
 
+        if (!registration) {
+            return {
+                success: false,
+                error: 'Failed to create registration.',
+            }
+        }
+
         revalidatePath(`/sessions/${sessionId}`)
         revalidatePath('/sessions')
         revalidatePath('/portal')
 
         return {
             success: true,
-            data: { registrationId: registration.id },
+            data: { registrationId: registration.reg_id },
         }
     } catch (error) {
         console.error('Unexpected error in registerForSession:', error)
@@ -240,14 +256,29 @@ export async function togglePaymentStatus(
 
             if (ledgerError) {
                 console.error('Error creating ledger entry:', ledgerError)
-                // Rollback registration update
-                await supabase
+
+                // Attempt rollback
+                const { error: rollbackError } = await supabase
                     .from('registrations')
                     .update({
                         payment_status: 'PENDING',
                         paid_at: null,
                     })
                     .eq('id', registrationId)
+
+                if (rollbackError) {
+                    // Critical: Manual intervention needed
+                    console.error('CRITICAL: Rollback failed!', {
+                        registrationId,
+                        ledgerError,
+                        rollbackError
+                    })
+
+                    return {
+                        success: false,
+                        error: 'Payment update failed. Contact administrator (ref: ' + registrationId + ')',
+                    }
+                }
 
                 return {
                     success: false,
@@ -298,8 +329,7 @@ export async function getSessionRegistrations(sessionId: string) {
                 id,
                 name,
                 phone,
-                preferred_position,
-                rating
+                preferred_position
             )
         `)
         .eq('session_id', sessionId)

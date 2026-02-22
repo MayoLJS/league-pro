@@ -24,7 +24,7 @@ export default function SessionLedger({ sessionId, initialPurseBalance }: Sessio
 
     useEffect(() => {
         loadLedger()
-    }, [sessionId])
+    }, [sessionId, initialPurseBalance])
 
     const loadLedger = async () => {
         setIsLoading(true)

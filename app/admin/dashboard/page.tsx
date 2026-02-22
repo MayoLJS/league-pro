@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getAllSessions } from '@/lib/actions/session-actions'
+import { getDashboardStats } from '@/lib/actions/stats-actions'
 import type { Session } from '@/lib/supabase/types'
 import LogOutButton from '@/components/LogOutButton'
 
@@ -19,7 +20,10 @@ export default function AdminDashboardPage() {
     }, [])
 
     const loadDashboardData = async () => {
-        const sessionsData = await getAllSessions()
+        const [sessionsData, dashboardStats] = await Promise.all([
+            getAllSessions(),
+            getDashboardStats(),
+        ])
 
         const activeSessions = sessionsData.filter(
             (s) => s.status === 'OPEN' || s.status === 'LOCKED' || s.status === 'IN_PROGRESS'
@@ -28,8 +32,8 @@ export default function AdminDashboardPage() {
         setSessions(sessionsData)
         setStats({
             activeSessions,
-            totalPlayers: 0,
-            totalPurse: 0,
+            totalPlayers: dashboardStats.totalPlayers,
+            totalPurse: dashboardStats.purseBalance,
         })
         setIsLoading(false)
     }
@@ -78,8 +82,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <LogOutButton />
                 </div>
-                {/* Quick Actions */}
-                <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem' }}>
+                <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                     <a
                         href="/portal"
                         target="_blank"
@@ -115,7 +118,34 @@ export default function AdminDashboardPage() {
                     >
                         💰 Main Purse
                     </a>
+                    <a
+                        href="/register"
+                        style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem 1.5rem',
+                            backgroundColor: '#1e293b',
+                            color: '#a5b4fc',
+                            borderRadius: '8px',
+                            textDecoration: 'none',
+                            fontWeight: '600',
+                            border: '1px solid #6366f140',
+                            transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = '#6366f120'
+                            e.currentTarget.style.borderColor = '#6366f1'
+                        }}
+                        onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = '#1e293b'
+                            e.currentTarget.style.borderColor = '#6366f140'
+                        }}
+                    >
+                        🔐 Create Admin
+                    </a>
                 </div>
+
 
                 {/* Stats Cards */}
                 <div
@@ -161,7 +191,7 @@ export default function AdminDashboardPage() {
                             {stats.totalPlayers}
                         </div>
                         <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                            Coming soon
+                            Registered accounts
                         </div>
                     </div>
 
@@ -179,10 +209,10 @@ export default function AdminDashboardPage() {
                             Total Purse
                         </div>
                         <div style={{ color: '#10b981', fontSize: '2rem', fontWeight: 'bold' }}>
-                            ₦{stats.totalPurse.toFixed(2)}
+                            ₦{stats.totalPurse.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </div>
                         <div style={{ color: '#64748b', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                            Coming soon
+                            Running balance
                         </div>
                     </div>
                 </div>

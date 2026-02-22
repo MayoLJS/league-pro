@@ -2,16 +2,17 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 /**
- * Middleware to protect admin routes
- * 
- * Checks if user has admin role before allowing access to /admin/* routes
- * Uses createServerClient to properly handle Supabase auth cookies
+ * Middleware — Route Protection
+ *
+ * /admin/*   → requires Supabase Auth + role = 'admin'
+ * /register  → requires Supabase Auth + role = 'admin'  (admin-only tool)
+ * /portal    → open (player_id cookie checked at page level)
+ * /          → open (name login embedded on page)
+ * /login     → open
  */
 export async function middleware(request: NextRequest) {
     let response = NextResponse.next({
-        request: {
-            headers: request.headers,
-        },
+        request: { headers: request.headers },
     })
 
     const supabase = createServerClient(
@@ -32,25 +33,25 @@ export async function middleware(request: NextRequest) {
         }
     )
 
-    // Refresh session if expired - required for Server Components
+    // Refresh session if expired
     const {
         data: { user },
     } = await supabase.auth.getUser()
 
-    // Protected Routes Handler
     const { pathname } = request.nextUrl
 
-    // Only protect admin routes
+    // ── Helper: redirect unauthenticated users ──
+    const redirectTo = (path: string) => {
+        const url = request.nextUrl.clone()
+        url.pathname = path
+        return NextResponse.redirect(url)
+    }
+
+    // ── Protect /admin/* ──
     if (pathname.startsWith('/admin')) {
-        if (!user) {
-            // Not authenticated - redirect to login
-            const url = request.nextUrl.clone()
-            url.pathname = '/login'
-            return NextResponse.redirect(url)
-        }
+        if (!user) return redirectTo('/login')
 
         try {
-            // Check if user has admin role
             const { data: player, error } = await supabase
                 .from('players')
                 .select('role')
@@ -58,34 +59,40 @@ export async function middleware(request: NextRequest) {
                 .single()
 
             if (error || !player || player.role !== 'admin') {
-                // Not an admin or error fetching role - redirect to portal
-                const url = request.nextUrl.clone()
-                url.pathname = '/portal'
-                return NextResponse.redirect(url)
+                return redirectTo('/portal')
             }
-
-            // User is admin - allow access (return the response with updated cookies)
-            return response
-        } catch (error) {
-            console.error('Middleware role check error:', error)
-            const url = request.nextUrl.clone()
-            url.pathname = '/portal'
-            return NextResponse.redirect(url)
+        } catch {
+            return redirectTo('/portal')
         }
+
+        return response
+    }
+
+    // ── Protect /register — admin-only tool ──
+    if (pathname.startsWith('/register')) {
+        if (!user) return redirectTo('/login')
+
+        try {
+            const { data: player, error } = await supabase
+                .from('players')
+                .select('role')
+                .eq('auth_user_id', user.id)
+                .single()
+
+            if (error || !player || player.role !== 'admin') {
+                // Non-admins trying to access /register → back to portal
+                return redirectTo('/portal')
+            }
+        } catch {
+            return redirectTo('/login')
+        }
+
+        return response
     }
 
     return response
 }
 
 export const config = {
-    matcher: [
-        /*
-         * Match all request paths except for the ones starting with:
-         * - _next/static (static files)
-         * - _next/image (image optimization files)
-         * - favicon.ico (favicon file)
-         * Feel free to modify this pattern to include more paths.
-         */
-        '/admin/:path*',
-    ],
+    matcher: ['/admin/:path*', '/register/:path*', '/register'],
 }

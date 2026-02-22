@@ -84,9 +84,10 @@ export default function LifetimeStatsPage() {
                                     <th style={{ padding: '1rem', textAlign: 'left', color: '#94a3b8', fontSize: '0.875rem' }}>Player</th>
                                     <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>Caps</th>
                                     <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>MOTM 🏅</th>
-                                    <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>Rating ⭐</th>
                                     <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>Goals ⚽</th>
                                     <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>G/G</th>
+                                    <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>Assists 🎯</th>
+                                    <th style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.875rem' }}>A/G</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -107,20 +108,23 @@ export default function LifetimeStatsPage() {
                                         <td style={{ padding: '1rem', textAlign: 'center', color: '#f59e0b', fontWeight: 'bold' }}>
                                             {player.motm > 0 ? player.motm : '-'}
                                         </td>
-                                        <td style={{ padding: '1rem', textAlign: 'center', color: '#e2e8f0' }}>
-                                            {player.rating.toFixed(1)}
-                                        </td>
                                         <td style={{ padding: '1rem', textAlign: 'center', color: '#10b981', fontWeight: 'bold', fontSize: '1.125rem' }}>
                                             {player.goals}
                                         </td>
                                         <td style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>
                                             {player.goalsPerGame}
                                         </td>
+                                        <td style={{ padding: '1rem', textAlign: 'center', color: '#3b82f6', fontWeight: 'bold', fontSize: '1.125rem' }}>
+                                            {player.assists}
+                                        </td>
+                                        <td style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>
+                                            {player.assistsPerGame}
+                                        </td>
                                     </tr>
                                 ))}
                                 {stats.length === 0 && (
                                     <tr>
-                                        <td colSpan={7} style={{ padding: '3rem', textAlign: 'center', color: '#64748b' }}>
+                                        <td colSpan={8} style={{ padding: '3rem', textAlign: 'center', color: '#64748b' }}>
                                             No stats recorded yet.
                                         </td>
                                     </tr>

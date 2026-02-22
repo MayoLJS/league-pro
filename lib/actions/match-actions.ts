@@ -81,6 +81,22 @@ export async function startMatch(sessionId: string): Promise<ActionResult<{ matc
     try {
         const supabase = await createClient()
 
+        // Authorization: Admin only
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+            return { success: false, error: 'You must be logged in.' }
+        }
+
+        const { data: admin } = await supabase
+            .from('players')
+            .select('id, role')
+            .eq('auth_user_id', user.id)
+            .single()
+
+        if (!admin || admin.role !== 'admin') {
+            return { success: false, error: 'Admin access required.' }
+        }
+
         // Get first two teams in queue
         const { data: teams } = await supabase
             .from('teams')
@@ -145,6 +161,22 @@ export async function recordGoal(
 ): Promise<ActionResult> {
     try {
         const supabase = await createClient()
+
+        // Authorization: Admin only
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+            return { success: false, error: 'You must be logged in.' }
+        }
+
+        const { data: admin } = await supabase
+            .from('players')
+            .select('id, role')
+            .eq('auth_user_id', user.id)
+            .single()
+
+        if (!admin || admin.role !== 'admin') {
+            return { success: false, error: 'Admin access required.' }
+        }
 
         // Get current match
         const { data: match } = await supabase
@@ -215,6 +247,22 @@ export async function endMatch(
     try {
         const supabase = await createClient()
 
+        // Authorization: Admin only
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+            return { success: false, error: 'You must be logged in.' }
+        }
+
+        const { data: admin } = await supabase
+            .from('players')
+            .select('id, role')
+            .eq('auth_user_id', user.id)
+            .single()
+
+        if (!admin || admin.role !== 'admin') {
+            return { success: false, error: 'Admin access required.' }
+        }
+
         // Get match details
         const { data: match } = await supabase
             .from('matches')
@@ -253,6 +301,21 @@ export async function endMatch(
             })
             .eq('id', matchId)
 
+        // Increment caps (appearances) for all players in both teams
+        const { data: teamAssignments } = await supabase
+            .from('team_assignments')
+            .select('player_id')
+            .in('team_id', [match.team_home_id, match.team_away_id])
+
+        if (teamAssignments && teamAssignments.length > 0) {
+            const playerIds = teamAssignments.map(ta => ta.player_id)
+
+            // Increment caps for all players in one query
+            await supabase.rpc('increment_player_caps', {
+                p_player_ids: playerIds
+            })
+        }
+
         // Get all teams to reorder queue
         const { data: teams } = await supabase
             .from('teams')
@@ -269,40 +332,37 @@ export async function endMatch(
 
         // Apply Winner Stays On logic
         if (isDraw) {
-            // DRAW: Both teams go to back of queue
+            // DRAW: Both teams go to back of queue (contiguous positions)
             const homeUpdate = teams.find((t) => t.id === match.team_home_id)!
             const awayUpdate = teams.find((t) => t.id === match.team_away_id)!
+            const maxPosition = teams.length
 
-            // Update stats
+            // Update home team to second-to-last position
             await supabase
                 .from('teams')
                 .update({
                     draws: homeUpdate.draws + 1,
                     points: homeUpdate.points + 1,
-                    queue_position: teams.length, // Back of queue
+                    queue_position: maxPosition - 1,
                 })
                 .eq('id', match.team_home_id)
 
+            // Update away team to last position
             await supabase
                 .from('teams')
                 .update({
                     draws: awayUpdate.draws + 1,
                     points: awayUpdate.points + 1,
-                    queue_position: teams.length + 1, // Back of queue
+                    queue_position: maxPosition,
                 })
                 .eq('id', match.team_away_id)
 
-            // Shift other teams forward
-            for (const team of teams) {
-                if (team.id !== match.team_home_id && team.id !== match.team_away_id && team.queue_position > 2) {
-                    await supabase
-                        .from('teams')
-                        .update({
-                            queue_position: team.queue_position - 2,
-                        })
-                        .eq('id', team.id)
-                }
-            }
+            // Shift all other teams forward by 2 positions using batch update
+            await supabase.rpc('shift_queue_positions', {
+                p_session_id: sessionId,
+                p_excluded_ids: [match.team_home_id, match.team_away_id],
+                p_shift_amount: -2
+            })
         } else {
             // WIN: Winner stays at position 1, loser goes to back
             const loserId = winnerId === match.team_home_id ? match.team_away_id : match.team_home_id
@@ -338,22 +398,12 @@ export async function endMatch(
                 throw loserError
             }
 
-            // Shift remaining teams
-            for (const team of teams) {
-                if (team.id !== winnerId && team.id !== loserId && team.queue_position > 1) {
-                    const { error: shiftError } = await supabase
-                        .from('teams')
-                        .update({
-                            queue_position: team.queue_position - 1,
-                        })
-                        .eq('id', team.id)
-
-                    if (shiftError) {
-                        console.error(`Error shifting team ${team.id}:`, shiftError)
-                        throw shiftError
-                    }
-                }
-            }
+            // Shift remaining teams using batch update
+            await supabase.rpc('shift_queue_positions', {
+                p_session_id: sessionId,
+                p_excluded_ids: [winnerId, loserId],
+                p_shift_amount: -1
+            })
         }
 
         revalidatePath(`/sessions/${sessionId}`)
@@ -374,11 +424,13 @@ export interface TopScorer {
     playerId: string
     name: string
     goals: number
+    assists: number
     teamName?: string
 }
 
 /**
- * Get top scorers for a session
+ * Get top scorers for a session.
+ * Assisters who never scored are resolved via a secondary name lookup.
  */
 export async function getTopScorers(sessionId: string): Promise<TopScorer[]> {
     const supabase = await createClient()
@@ -395,12 +447,14 @@ export async function getTopScorers(sessionId: string): Promise<TopScorer[]> {
 
     const matchIds = matches.map(m => m.id)
 
-    // 2. Get GOAL events for these matches
+    // 2. Get all goal events with scorer name/team and assister id
     const { data: events, error } = await supabase
         .from('match_events')
         .select(`
             player_id,
-            players (name),
+            assisted_by,
+            event_type,
+            players!player_id (name),
             teams (name)
         `)
         .in('match_id', matchIds)
@@ -411,28 +465,64 @@ export async function getTopScorers(sessionId: string): Promise<TopScorer[]> {
         return []
     }
 
-    // console.log(`Found ${events?.length || 0} goal events for session ${sessionId}`)
-
     if (!events) return []
 
-    // Aggregate goals
+    // Aggregate goals and assists
     const scorerMap = new Map<string, TopScorer>()
 
     events.forEach((event: any) => {
+        // Count goals
         const playerId = event.player_id
-        if (!playerId) return
-
-        if (!scorerMap.has(playerId)) {
-            scorerMap.set(playerId, {
-                playerId,
-                name: event.players?.name || 'Unknown',
-                goals: 0,
-                teamName: event.teams?.name
-            })
+        if (playerId) {
+            if (!scorerMap.has(playerId)) {
+                scorerMap.set(playerId, {
+                    playerId,
+                    name: event.players?.name || 'Unknown',
+                    goals: 0,
+                    assists: 0,
+                    teamName: event.teams?.name,
+                })
+            }
+            scorerMap.get(playerId)!.goals++
         }
-        scorerMap.get(playerId)!.goals++
+
+        // Count assists (name resolved below for assister-only players)
+        const assisterId = event.assisted_by
+        if (assisterId) {
+            if (!scorerMap.has(assisterId)) {
+                scorerMap.set(assisterId, {
+                    playerId: assisterId,
+                    name: '__PENDING__',
+                    goals: 0,
+                    assists: 0,
+                    teamName: undefined,
+                })
+            }
+            scorerMap.get(assisterId)!.assists++
+        }
     })
 
-    // Convert to array and sort by goals (descending)
-    return Array.from(scorerMap.values()).sort((a, b) => b.goals - a.goals)
+    // 3. Resolve names for assisters who never scored (batch lookup)
+    const unresolvedIds = Array.from(scorerMap.values())
+        .filter(p => p.name === '__PENDING__')
+        .map(p => p.playerId)
+
+    if (unresolvedIds.length > 0) {
+        const { data: players } = await supabase
+            .from('players')
+            .select('id, name')
+            .in('id', unresolvedIds)
+
+        if (players) {
+            players.forEach(p => {
+                const entry = scorerMap.get(p.id)
+                if (entry) entry.name = p.name
+            })
+        }
+    }
+
+    // 4. Return sorted by goals desc, then assists desc
+    return Array.from(scorerMap.values())
+        .filter(p => p.goals > 0 || p.assists > 0)
+        .sort((a, b) => b.goals - a.goals || b.assists - a.assists)
 }

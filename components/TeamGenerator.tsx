@@ -13,9 +13,10 @@ interface TeamGeneratorProps {
     sessionId: string
     paidPlayersCount: number
     onTeamsSaved: () => void
+    savedTeams?: any[]
 }
 
-export default function TeamGenerator({ sessionId, paidPlayersCount, onTeamsSaved }: TeamGeneratorProps) {
+export default function TeamGenerator({ sessionId, paidPlayersCount, onTeamsSaved, savedTeams = [] }: TeamGeneratorProps) {
     const [generatedTeams, setGeneratedTeams] = useState<GeneratedTeam[] | null>(null)
     const [isGenerating, setIsGenerating] = useState(false)
     const [isSaving, setIsSaving] = useState(false)
@@ -58,6 +59,93 @@ export default function TeamGenerator({ sessionId, paidPlayersCount, onTeamsSave
     const handleRegenerateTeams = () => {
         setGeneratedTeams(null)
         setError(null)
+    }
+
+    // If teams are already saved in the DB, show the locked view
+    if (savedTeams.length > 0) {
+        return (
+            <div>
+                <div
+                    style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.6rem 1rem',
+                        backgroundColor: '#10b98115',
+                        border: '1px solid #10b98140',
+                        borderRadius: '8px',
+                        marginBottom: '1.5rem',
+                    }}
+                >
+                    <span style={{ fontSize: '0.875rem', color: '#10b981', fontWeight: '600' }}>✓ Teams locked — {savedTeams.length} teams saved</span>
+                </div>
+                <div
+                    style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))',
+                        gap: '1.5rem',
+                    }}
+                >
+                    {savedTeams.map((team: any) => {
+                        const captain = team.team_assignments?.find((a: any) => a.is_captain)
+                        const squad = team.team_assignments?.filter((a: any) => !a.is_captain) ?? []
+                        return (
+                            <div
+                                key={team.id}
+                                style={{
+                                    backgroundColor: '#0f172a',
+                                    padding: '1.5rem',
+                                    borderRadius: '12px',
+                                    border: '2px solid #10b981',
+                                }}
+                            >
+                                <h3 style={{ color: 'white', fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '0.75rem' }}>
+                                    {team.name}
+                                </h3>
+                                {captain && (
+                                    <div
+                                        style={{
+                                            padding: '0.75rem',
+                                            backgroundColor: '#f59e0b20',
+                                            border: '2px solid #f59e0b',
+                                            borderRadius: '8px',
+                                            marginBottom: '0.75rem',
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div>
+                                                <div style={{ color: 'white', fontWeight: '600' }}>👑 {captain.players?.name}</div>
+                                                <div style={{ color: '#f59e0b', fontSize: '0.75rem', fontWeight: '600' }}>CAPTAIN</div>
+                                            </div>
+                                            <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>{captain.players?.preferred_position}</div>
+                                        </div>
+                                    </div>
+                                )}
+                                <div style={{ color: '#94a3b8', fontSize: '0.75rem', marginBottom: '0.5rem', fontWeight: '600' }}>SQUAD</div>
+                                <div style={{ display: 'grid', gap: '0.5rem' }}>
+                                    {squad.map((a: any) => (
+                                        <div
+                                            key={a.players?.id}
+                                            style={{
+                                                padding: '0.5rem',
+                                                backgroundColor: '#1e293b',
+                                                borderRadius: '6px',
+                                                display: 'flex',
+                                                justifyContent: 'space-between',
+                                                alignItems: 'center',
+                                            }}
+                                        >
+                                            <div style={{ color: 'white', fontSize: '0.875rem' }}>{a.players?.name}</div>
+                                            <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>{a.players?.preferred_position}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )
+                    })}
+                </div>
+            </div>
+        )
     }
 
     if (paidPlayersCount < 4) {
@@ -226,7 +314,7 @@ export default function TeamGenerator({ sessionId, paidPlayersCount, onTeamsSave
                                         </div>
                                     </div>
                                     <div style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
-                                        {team.captain.position} • {team.captain.rating}/10
+                                        {team.captain.position}
                                     </div>
                                 </div>
                             </div>
@@ -254,7 +342,7 @@ export default function TeamGenerator({ sessionId, paidPlayersCount, onTeamsSave
                                             {player.name}
                                         </div>
                                         <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>
-                                            {player.position} • {player.rating}/10
+                                            {player.position}
                                         </div>
                                     </div>
                                 ))}

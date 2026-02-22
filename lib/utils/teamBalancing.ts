@@ -41,7 +41,6 @@ export interface Player {
     id: string;
     name: string;
     preferred_position: Position;
-    rating?: number;
     isCaptain?: boolean;
 }
 

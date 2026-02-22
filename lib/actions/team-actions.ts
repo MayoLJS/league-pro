@@ -22,13 +22,11 @@ export interface GeneratedTeam {
         id: string
         name: string
         position: string
-        rating: number
     }
     players: Array<{
         id: string
         name: string
         position: string
-        rating: number
     }>
     positionCounts: {
         DEF: number
@@ -80,8 +78,7 @@ export async function generateTeamsForSession(
                 players:player_id (
                     id,
                     name,
-                    preferred_position,
-                    rating
+                    preferred_position
                 )
             `)
             .eq('session_id', sessionId)
@@ -108,7 +105,6 @@ export async function generateTeamsForSession(
             id: reg.players.id,
             name: reg.players.name,
             preferred_position: reg.players.preferred_position as 'DEF' | 'MID' | 'ATT',
-            rating: reg.players.rating || 5,
         }))
 
         // Use the team balancing utility (captains auto-assigned to first player in each team)
@@ -134,13 +130,11 @@ export async function generateTeamsForSession(
                     id: captain.id,
                     name: captain.name,
                     position: captain.preferred_position,
-                    rating: captain.rating || 5,
                 },
                 players: teamPlayers.map((p) => ({
                     id: p.id,
                     name: p.name,
                     position: p.preferred_position,
-                    rating: p.rating || 5,
                 })),
                 positionCounts: team.positionCounts,
             }
@@ -303,8 +297,7 @@ export async function getSessionTeams(sessionId: string) {
                 players:player_id (
                     id,
                     name,
-                    preferred_position,
-                    rating
+                    preferred_position
                 )
             )
         `)

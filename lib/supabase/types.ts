@@ -31,7 +31,6 @@ export interface Player {
     phone: string | null
     email: string | null
     preferred_position: Position
-    rating: number
     caps: number
     man_of_the_match_count: number
     role: UserRole
